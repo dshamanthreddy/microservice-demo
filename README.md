@@ -10,6 +10,8 @@ This simple micro-service demonstation utilises the following technologies:
 
 This demo has 3 microservice api endpoints which you can connect to via making requests to the nginx container.
 
+ * http://127.0.0.1/
+   * This will provide you with a list of the currently available endpoints.
  * http://127.0.0.1/hello/
    * This endpoint has 2 containers associated with it providing loadbalancing and automatic failover if one stopped.
  * http://127.0.0.1/secure/
