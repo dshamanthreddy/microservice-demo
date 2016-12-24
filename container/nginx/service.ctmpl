@@ -1,0 +1,125 @@
+{{range services -}}
+{{if in .Tags "api" -}}
+upstream service_{{.Name|toLower}} {
+  least_conn;
+  {{range service .Name -}}
+  server {{.Address}}:{{.Port}} max_fails=3 fail_timeout=60 weight=1;
+  {{else}}
+  server 127.0.0.1:65535 down; #Force a 502
+  {{end}}
+}
+{{end}}{{end}}
+server {
+  listen 80 default_server;
+  charset utf-8;
+  error_page 404 @404;
+  error_page 401 @401;
+  error_page 500 @500;
+  error_page 502 @502;
+  error_page 503 @503;
+  error_page 504 @504;
+
+  log_not_found  off;
+  log_subrequest on;
+  
+  location = / {
+    default_type application/json;
+    return 200 '{"error":null, "code":200, "message":"Avilable Endpoints", "data":{"endpoints": [{{range services}}{{if in .Tags "api"}}{{if in .Tags "public"}}"{{.Name|toLower}}",{{end}}{{end}}{{end}}]}}';
+  }
+
+  {{range services}}
+  location /{{.Name|toLower}}/ {
+    access_log /var/log/nginx/access_{{.Name|toLower}}.log main;
+    error_log  /var/log/nginx/error_{{.Name|toLower}}.log error;
+
+    {{if in .Tags "protected" -}}
+    satisfy any;
+    auth_request /_authorize;
+    deny all;
+    {{end -}}
+
+    set $remote_service service_{{.Name|toLower}};
+    proxy_pass http://$remote_service/;
+    {{if in .Tags "api" -}}
+    {{if in .Tags "public" -}}
+    proxy_redirect          off;
+    proxy_http_version      1.1;
+    proxy_set_header        Host            $host;
+    proxy_set_header        Connection      "";
+    proxy_set_header        X-Real-IP       $remote_addr;
+    proxy_set_header        X-Forwarded-For $proxy_add_x_forwarded_for;
+    client_max_body_size    0;
+    proxy_connect_timeout   90;
+    proxy_send_timeout      90;
+    proxy_read_timeout      90;
+    proxy_buffering         off;
+    {{- else -}}
+    return 404 @404;{{end}}
+    {{- else -}}
+    return 404 @404;{{end}}
+  }
+{{end}}
+
+  location @401 {
+    internal;
+    default_type application/json;
+    return 401 '{"code":"401","error":{"message":"Access Denied"}}';
+  }
+
+  location @404 {
+    internal;
+    default_type application/json;
+    return 404 '{"code":"404","error":{"message":"Resource Not Found"}}';
+  }
+
+  location @500 {
+    internal;
+    default_type application/json;
+    return 500 '{"code":"500","error":{"message":"Internal Server Error"}}';
+  }
+
+  location @502 {
+    internal;
+    default_type application/json;
+    return 502 '{"code":"502","error":{"message":"Bad Gateway"}}';
+  }
+
+  location @503 {
+    internal;
+    default_type application/json;
+    return 503 '{"code":"503","error":{"message":"Service Unavailable"}}';
+  } 
+
+  location @504 {
+    internal;
+    default_type application/json;
+    return 504 '{"code":"504","error":{"message":"Gateway Timeout"}}';
+  }
+
+
+  location = /_authorize {
+    internal;
+
+    {{range services -}}
+    {{if in .Name "auth-service" -}}
+    set $remote_auth_service service_{{.Name|toLower}};
+    {{end -}}
+    {{end -}}
+    if ($remote_auth_service = false){
+      set $remote_auth_service "127.0.0.1:65535";
+    }
+
+    proxy_pass http://$remote_auth_service/;
+    proxy_pass_request_body off;
+    proxy_connect_timeout 5s;
+    proxy_read_timeout 5s;
+    proxy_set_header Content-Length "";
+    proxy_set_header X-Original-URI $request_uri;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header API-KEY $http_api_key;
+  }
+}
+
